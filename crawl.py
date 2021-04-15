@@ -2,6 +2,8 @@ from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.firefox.webdriver import WebDriver
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import ElementNotVisibleException, ElementClickInterceptedException
+import pandas as pd
 import time
 
 
@@ -61,7 +63,7 @@ class CommentCrawl(object):
         element = self.browser.find_element_by_xpath(
             '//a[@class="pdp-link pdp-link_size_s pdp-link_theme_blue pdp-review-summary__link"]')
         element.click()
-        time.sleep(3)
+        time.sleep(6)
         element = self.browser.find_element_by_xpath('//*')
         element.send_keys(Keys.HOME)
         time.sleep(3)
@@ -75,38 +77,71 @@ class CommentCrawl(object):
             if i == 4 or image_links[i] != image_links[i + 1]:
                 return i + 1
 
+    def switch_page(self):
+        self.browser.execute_script('window.scrollTo(0, document.body.scrollHeight/2)')
+        self.browser.find_element_by_xpath('/html/body/div[3]/div/div[3]/div[1]/div/div[1]/div[3]/div/ul/li[9]/a').click()
+        time.sleep(5)
+
     def crawl_page(self, url):
         time.sleep(5)
         self.browser.get(url)
+        time.sleep(5)
         self.jump_to_comment()
         texts, stars = self.get_data()
 
+        time.sleep(50)
         return texts, stars
 
     def crawl_agent(self, url):
         self.open_browser()
         self.browser.get(url)
         categories, urls = self.get_category_urls()
-        data = dict()
+        # categories = ['Pet food']
+        # urls = ['https://www.lazada.vn/thuc-an-thu-cung/?spm=a2o4n.searchlistcategory.cate_6.11.745e44a7GiBH5M']
 
         for i, url in enumerate(urls):
-            all_category_feedbacks = []
+            if i in range(12):
+                continue
+            time.sleep(50)
+            all_category_feedbacks = [[], [], []]
             self.browser.get(url)
 
             element_urls = []
-            elements = self.browser.find_elements_by_xpath('/html/body/div[3]/div/div[3]/div[1]/div/div[1]/div[2]/div')
-            for j in range(len(elements)):
-                element_url = self.browser.find_element_by_xpath(
-                    f'/html/body/div[3]/div/div[3]/div[1]/div/div[1]/div[2]/div[{j+1}]/div/div/div[1]/div[1]/a')
-                element_urls.append(element_url.get_attribute('href'))
+            for _ in range(50):
+                elements = self.browser.find_elements_by_xpath('/html/body/div[3]/div/div[3]/div[1]/div/div[1]/div[2]/div')
+                for j in range(len(elements)):
+                    element_url = self.browser.find_element_by_xpath(
+                        f'/html/body/div[3]/div/div[3]/div[1]/div/div[1]/div[2]/div[{j+1}]/div/div/div[1]/div[1]/a')
+                    element_urls.append(element_url.get_attribute('href'))
+
+                if len(element_urls) > 200:
+                    break
+                self.switch_page()
 
             for element_url in element_urls:
-                user_feedbacks = self.crawl_page(element_url)
-                all_category_feedbacks.extend(user_feedbacks)
-                print('Complete one page!')
-                time.sleep(30)
+                try:
+                    feedbacks, stars = self.crawl_page(element_url)
 
-            data[categories[i]] = all_category_feedbacks
+                    all_category_feedbacks[0].extend([categories[i]] * len(stars))
+                    all_category_feedbacks[1].extend(feedbacks)
+                    all_category_feedbacks[2].extend(stars)
+
+                    data = {'category': all_category_feedbacks[0],
+                            'comment': all_category_feedbacks[1],
+                            'rate': all_category_feedbacks[2]}
+                    df = pd.DataFrame(data, columns=['category', 'comment', 'rate'])
+                    df.to_csv(f'{categories[i]}.csv')
+
+                    print(feedbacks)
+                    print(stars)
+                    print('Complete one page!')
+
+                except ElementNotVisibleException:
+                    print('Ignore 1 page')
+                    time.sleep(60)
+                except ElementClickInterceptedException:
+                    print('Ignore 1 page')
+                    time.sleep(60)
 
             print('Complete!')
 
